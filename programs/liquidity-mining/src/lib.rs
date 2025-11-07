@@ -29,7 +29,10 @@ pub enum ErrorCode {
     POOL_SHARE_DIVISION_ERROR,
 
     #[msg("Division error when normalizing reward precision")]
-    SCALING_DIVISION_ERROR
+    SCALING_DIVISION_ERROR,
+
+    #[msg("dkla")]
+    REWARD_AMOUNT_OVERFLOW
 }
 
 declare_id!("6AA73D9hmpkQdrXdWZRFQoUJa7gN13N85EcBptqy8K3V");
@@ -70,7 +73,10 @@ pub mod liquidity_mining {
         let user_token_account = &ctx.accounts.user_token_account;
         let user_position = &mut ctx.accounts.user_position;
 
-        require!(user_position.amount_staked == 0, ErrorCode::ALREADY_ACTIVE_POSITION);
+        require!(
+            user_position.amount_staked == 0,
+            ErrorCode::ALREADY_ACTIVE_POSITION
+        );
 
         require!(
             user_token_account.amount >= amount,
@@ -115,15 +121,14 @@ pub mod liquidity_mining {
 
         let staked_amount = user_position.amount_staked;
         let current_time = Clock::get()?.unix_timestamp;
-        
+
         // Edge Case 2: Prevent negative time elapsed
-        let time_elapsed = current_time.saturating_sub(user_position.last_claimed).max(0);
+        let time_elapsed = current_time
+            .saturating_sub(user_position.last_claimed)
+            .max(0);
 
         // Edge Case 1: Prevent division by zero
-        require!(
-            pool_config.total_staked > 0,
-            ErrorCode::INVALID_POOL_STATE
-        );
+        require!(pool_config.total_staked > 0, ErrorCode::INVALID_POOL_STATE);
 
         // Calculate rewards: final_rewards = pool_reward_rate × time_elapsed × user_share
         // where user_share = user_amount / pool_total_staked
@@ -135,9 +140,8 @@ pub mod liquidity_mining {
             .checked_mul(staked_amount as u128)
             .ok_or(ErrorCode::STAKE_AMOUNT_MULTIPLICATION_OVERFLOW)?
             .checked_div(pool_config.total_staked as u128) // Divide by pool total to get user share
-            .ok_or(ErrorCode::POOL_SHARE_DIVISION_ERROR)?
-            .checked_div(1_000_000_000) // Divide by 1e9 scaling factor
-            .ok_or(ErrorCode::SCALING_DIVISION_ERROR)? as u64;
+            .ok_or(ErrorCode::POOL_SHARE_DIVISION_ERROR)?;
+        let reward_amount: u64 = reward_amount.try_into().map_err(|_| ErrorCode::REWARD_AMOUNT_OVERFLOW)?;
 
         // First CPI: Transfer LP tokens back to user
         let lp_seeds = &[
@@ -191,7 +195,6 @@ pub mod liquidity_mining {
 
         Ok(())
     }
-
 }
 
 #[account]
